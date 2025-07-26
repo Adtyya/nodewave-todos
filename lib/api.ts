@@ -12,7 +12,17 @@ const BASE_URL =
 
 const getToken = (): string | null => {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("accessToken");
+
+  const persisted = localStorage.getItem("accessToken");
+  if (!persisted) return null;
+
+  try {
+    const parsed = JSON.parse(persisted);
+    return parsed?.state?.accessToken ?? null;
+  } catch (e) {
+    console.error("Failed to parse auth token from localStorage", e);
+    return null;
+  }
 };
 
 const api: AxiosInstance = axios.create({
@@ -23,12 +33,32 @@ const api: AxiosInstance = axios.create({
   },
 });
 
+let isVerifying = false;
+
 api.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
+  async (config: InternalAxiosRequestConfig) => {
     const token = getToken();
+
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
+
+      if (!isVerifying && !config.url?.includes("/verify-token")) {
+        isVerifying = true;
+        try {
+          await axios.post(`${BASE_URL}/verify-token`, { token });
+        } catch (error) {
+          localStorage.removeItem("accessToken");
+          toast.error("Token tidak valid. Harap login kembali.");
+          if (typeof window !== "undefined") {
+            window.location.href = "/login";
+          }
+          throw error;
+        } finally {
+          isVerifying = false;
+        }
+      }
     }
+
     return config;
   },
   (error: AxiosError) => {
